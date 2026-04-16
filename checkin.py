@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 ENV_PUSH_KEY = "PUSHDEER_SENDKEY"
 ENV_COOKIES = "GLADOS_COOKIES"
 ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
-ENV_PUSHPLUS_TOKEN = "pushplus_token"  # 按你要求使用小写字段名
+ENV_PUSHPLUS_TOKEN = "pushplus_token"
 
 # API URLs
 CHECKIN_URL = "https://glados.cloud/api/user/checkin"
@@ -35,7 +35,7 @@ POINTS_URL = "https://glados.cloud/api/user/points"
 EXCHANGE_URL = "https://glados.cloud/api/user/exchange"
 
 # POST DATA
-CHECKIN_DATA = {"token": "glados.cloud"} 
+CHECKIN_DATA = {"token": "glados.cloud"}
 
 # Request Headers
 HEADERS_TEMPLATE = {
@@ -46,7 +46,7 @@ HEADERS_TEMPLATE = {
 }
 
 # Exchange Plan Points
-EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500} 
+EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500}
 
 def load_config() -> Tuple[str, List[str], str, str]:
     push_key_env = os.environ.get(ENV_PUSH_KEY)
@@ -76,7 +76,7 @@ def load_config() -> Tuple[str, List[str], str, str]:
     if not exchange_plan_env:
         logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 未设置，将使用默认兑换计划 'plan500'。")
         exchange_plan = "plan500"
-    else: 
+    else:
         if exchange_plan_env in EXCHANGE_POINTS:
              exchange_plan = exchange_plan_env
              logger.info(f"使用指定的兑换计划: {exchange_plan}")
@@ -93,7 +93,6 @@ def load_config() -> Tuple[str, List[str], str, str]:
 
 
 def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[Dict] = None, cookies: str = "") -> Optional[requests.Response]:
-
     session_headers = headers.copy()
     session_headers['cookie'] = cookies
 
@@ -116,7 +115,6 @@ def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[
 
 
 def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str, str, str]:
-
     status_msg = "签到请求失败"
     points_gained = "0"
     remaining_days = "获取剩余天数失败"
@@ -135,6 +133,9 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
         if "Checkin! Got" in response_message:
             status_msg = f"签到成功，获得 {points_gained} 积分"
         elif "Checkin Repeats!" in response_message:
+            status_msg = "重复签到，明天再来"
+            points_gained = "0"
+        elif "Today's observation logged" in response_message:
             status_msg = "重复签到，明天再来"
             points_gained = "0"
         else:
@@ -186,7 +187,7 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
     except (ValueError, TypeError):
         logger.warning(f"无法解析当前积分数值，可能影响兑换判断: {remaining_points}")
 
-    required_points = EXCHANGE_POINTS.get(exchange_plan, 500) 
+    required_points = EXCHANGE_POINTS.get(exchange_plan, 500)
     if current_points_numeric >= required_points:
         logger.info(f"开始兑换 {exchange_plan} 计划 (需要 {required_points} 积分)")
         exchange_response = make_request(EXCHANGE_URL, 'POST', HEADERS_TEMPLATE, {"planType": exchange_plan}, cookies=cookie)
@@ -211,32 +212,38 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
     return status_msg, points_gained, remaining_days, remaining_points, exchange_msg
 
 
+# ====================== 美化版：带 emoji 推送格式 ======================
 def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
+    success_count = sum(1 for r in results if "签到成功" in r['status'])
+    repeat_count = sum(1 for r in results if "重复签到" in r['status'])
+    fail_count = len(results) - success_count - repeat_count
 
-    success_count = sum(1 for r in results if "成功" in r['status'])
-    fail_count = sum(1 for r in results if "失败" in r['status'] or "失败" in r['exchange'])
-    repeat_count = sum(1 for r in results if "重复" in r['status'])
+    title = f'🎉 GLaDOS 签到完成 | 成功:{success_count} 重复:{repeat_count} 失败:{fail_count}'
 
-    title = f'GLaDOS 签到, 成功{success_count}, 失败{fail_count}, 重复{repeat_count}'
+    tz = datetime.timezone(datetime.timedelta(hours=8))
+    now = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+    content = [f"📅 签到时间：{now}\n"]
 
-    content_lines = []
     for i, res in enumerate(results, 1):
-        line_parts = [
-            f"账号{i}:",
-            f"P:{res['points']}",
-            f"剩余天数:{res['days']}",
-            f"总积分:{res['points_total']}",
-            f"| {res['status']}",
-            f"; {res['exchange']}"
-        ]
-        line = " ".join(line_parts)
-        content_lines.append(line)
+        status = res["status"]
+        if "签到成功" in status:
+            ico = "✅"
+        elif "重复签到" in status:
+            ico = "🔄"
+        else:
+            ico = "❌"
 
-    content = "\n".join(content_lines)
-    return title, content
+        content.append(f"🔖 账号 {i} {ico}")
+        content.append(f"📝 状态：{res['status']}")
+        content.append(f"🎁 今日积分：{res['points']}")
+        content.append(f"📆 剩余时长：{res['days']}")
+        content.append(f"💰 总积分：{res['points_total']}")
+        content.append(f"💎 兑换：{res['exchange']}\n")
+
+    return title, "\n".join(content)
 
 
-# ====================== 新增：纯 PushPlus 独立推送函数 ======================
+# ====================== PushPlus 独立推送 ======================
 def send_pushplus(token, title, content):
     if not token:
         return
@@ -244,11 +251,11 @@ def send_pushplus(token, title, content):
         url = "https://www.pushplus.plus/send"
         data = {
             "token": token,
-            "title": "Glados签到通知",
+            "title": "🎉 Glados 自动签到通知",
             "content": content,
             "template": "txt"
         }
-        requests.post(url, json=data, timeout=8)
+        requests.post(url, json=data, timeout=10)
         logger.info("✅ PushPlus 推送完成")
     except:
         logger.info("❌ PushPlus 推送失败")
@@ -282,7 +289,7 @@ def main():
         logger.error(f"主程序执行过程中发生未预期的错误: {e}")
         title, content = "# 脚本执行出错", str(e)
 
-    # ====================== 原来的 PushDeer 完全不动 ======================
+    # PushDeer 原有逻辑不变
     if not push_key:
         logger.info(f"未设置 '{ENV_PUSH_KEY}'，跳过推送通知。")
     else:
@@ -293,7 +300,7 @@ def main():
         except Exception as e:
             logger.error(f"发送推送通知失败: {e}")
 
-    # ====================== 新增：独立运行 PushPlus ======================
+    # PushPlus 新增
     send_pushplus(pushplus_token, title, content)
 
 

@@ -41,7 +41,7 @@ CHECKIN_DATA = {"token": "glados.cloud"}
 HEADERS_TEMPLATE = {
     'referer': 'https://glados.cloud/console/checkin',
     'origin': "https://glados.cloud",
-    'user-agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36",
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36',
     'content-type': 'application/json;charset=UTF-8'
 }
 
@@ -212,7 +212,7 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
     return status_msg, points_gained, remaining_days, remaining_points, exchange_msg
 
 
-# ====================== 美化版：带 emoji 推送格式 ======================
+# ====================== 美化版 + 你的邮箱账号 ======================
 def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
     success_count = sum(1 for r in results if "签到成功" in r['status'])
     repeat_count = sum(1 for r in results if "重复签到" in r['status'])
@@ -224,7 +224,13 @@ def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
     now = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
     content = [f"📅 签到时间：{now}\n"]
 
-    for i, res in enumerate(results, 1):
+    # 固定显示你指定的邮箱
+    account_names = [
+        "1540569036@qq.com",
+        "2640968416@qq.com"
+    ]
+
+    for i, res in enumerate(results):
         status = res["status"]
         if "签到成功" in status:
             ico = "✅"
@@ -233,7 +239,13 @@ def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
         else:
             ico = "❌"
 
-        content.append(f"🔖 账号 {i} {ico}")
+        # 这里直接显示你的邮箱
+        if i < len(account_names):
+            name = account_names[i]
+        else:
+            name = f"账号 {i+1}"
+
+        content.append(f"🔖 {name} {ico}")
         content.append(f"📝 状态：{res['status']}")
         content.append(f"🎁 今日积分：{res['points']}")
         content.append(f"📆 剩余时长：{res['days']}")
@@ -270,8 +282,8 @@ def main():
             title, content = "# 未找到 cookies!", ""
         else:
             results = []
-            for idx, cookie in enumerate(cookies_list, 1):
-                logger.info(f"正在处理第 {idx} 个账户...")
+            for idx, cookie in enumerate(cookies_list):
+                logger.info(f"正在处理第 {idx+1} 个账户...")
                 status, points, days, points_total, exchange = checkin_and_process(cookie, exchange_plan)
                 results.append({
                     'status': status,
